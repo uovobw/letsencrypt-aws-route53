@@ -1,0 +1,14 @@
+aws:
+    load_balancers:
+        - "staging-load-balancer"
+        - "production-load-balancer"
+    access_key: "super_secret_access_key"
+    access_secret: "super_secret_access_secret"
+    region: "eu-west-1"
+letsencrypt:
+    test: true
+    work_directory: "/some/usable/existing/directory/tree"
+    email: "notification.user@your.domain.com"
+    domains:
+        - "base-domain.com"
+        - "*.base-domain.com"

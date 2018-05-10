@@ -1,0 +1,69 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "iam:GetServerCertificate",
+                "iam:UpdateServerCertificate",
+                "route53:GetChange",
+                "elasticloadbalancing:ModifyLoadBalancerAttributes",
+                "iam:UploadServerCertificate"
+            ],
+            "Resource": [
+                "arn:aws:route53:::change/*",
+                "arn:aws:elasticloadbalancing:*:*:loadbalancer/*",
+                "arn:aws:iam::*:server-certificate/*"
+            ]
+        },
+        {
+            "Sid": "VisualEditor1",
+            "Effect": "Allow",
+            "Action": [
+                "iam:ListServerCertificates",
+                "route53:ChangeResourceRecordSets",
+                "elasticloadbalancing:DeleteLoadBalancerListeners",
+                "elasticloadbalancing:ModifyLoadBalancerAttributes",
+                "elasticloadbalancing:CreateLoadBalancerListeners",
+                "elasticloadbalancing:SetLoadBalancerListenerSSLCertificate"
+            ],
+            "Resource": [
+                "arn:aws:elasticloadbalancing:*:*:loadbalancer/*",
+                "arn:aws:route53:::hostedzone/*",
+                "arn:aws:iam::*:*"
+            ]
+        },
+        {
+            "Sid": "VisualEditor2",
+            "Effect": "Allow",
+            "Action": "elasticloadbalancing:ModifyLoadBalancerAttributes",
+            "Resource": "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*"
+        },
+        {
+            "Sid": "VisualEditor3",
+            "Effect": "Allow",
+            "Action": "elasticloadbalancing:ModifyLoadBalancerAttributes",
+            "Resource": "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*"
+        },
+        {
+            "Sid": "VisualEditor4",
+            "Effect": "Allow",
+            "Action": [
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "route53:ListHostedZones"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "VisualEditor5",
+            "Effect": "Allow",
+            "Action": [
+                "elasticloadbalancing:DeleteLoadBalancerListeners",
+                "elasticloadbalancing:CreateLoadBalancerListeners",
+                "elasticloadbalancing:SetLoadBalancerListenerSSLCertificate"
+            ],
+            "Resource": "arn:aws:elasticloadbalancing:*:*:loadbalancer/*"
+        }
+    ]
+}
