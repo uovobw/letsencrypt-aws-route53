@@ -8,21 +8,25 @@ if sys.version_info.major != 3 or sys.version_info.minor != 6:
     sys.exit(1)
 
 import os
+import time
 from distutils.spawn import find_executable
 import subprocess
+from dateutil import parser
 
 import yaml
 import boto3
 import botocore
+import OpenSSL
 
 logger = logging.getLogger("le_aws")
 logger.setLevel(logging.DEBUG)
 logger.addHandler(logging.StreamHandler(stream=sys.stdout))
 
 CONFIG_FILE="config.yml"
-STATE_FILE="state.yml"
 LE_PRODUCTION_SERVER="https://acme-v02.api.letsencrypt.org/directory"
 LE_TEST_SERVER="https://acme-staging-v02.api.letsencrypt.org/directory"
+LOAD_BALANCER_PORT=443
+AWS_SLEEP_TIME=60
 
 def get_from_config(config, section, key):
     try:
@@ -124,66 +128,116 @@ for lb_name in configured_load_balancers:
         logger.error("found load balancers: {}".format(",".join(aws_load_balancers_names)))
         sys.exit(1)
 
-# verify the state file
-first_run = False
-state = None
-try:
-    state = yaml.load(open(STATE_FILE).read())
-except Exception as e:
-    logger.warn("error opening state file {}: {}. considering this to be the first run".format(STATE_FILE, e))
-    first_run = True
-    state = {}
+configured_domains = get_from_config(config, "letsencrypt", "domains")
 
-
-if first_run:
-    logger.info("creating certificate for the first time")
-    cmd = [certbot_binary,
-           "certonly",
-           "--dns-route53",
-           "--logs-dir",
-           logs_directory,
-           "--config-dir",
-           config_directory,
-           "--work-dir",
-           work_directory,
-           "-m",
-           notification_email,
-           "--agree-tos",
-           "--non-interactive",
-           "--server"
-          ]
-    if test_mode:
-        cmd.append(LE_TEST_SERVER)
-    else:
-        cmd.append(LE_PRODUCTION_SERVER)
-    for domain in get_from_config(config, "letsencrypt", "domains"):
-        cmd.append("-d")
-        cmd.append(domain)
-    logger.debug("running certbot as: {}".format(" ".join(cmd)))
-    certbot = subprocess.Popen(
-        cmd,
-        stderr=subprocess.STDOUT,
-        stdout=subprocess.PIPE,
-        cwd=le_work_directory,
-        encoding="utf-8",
-        errors="ignore",
-        env={
-            "AWS_ACCESS_KEY_ID": aws_access_key,
-            "AWS_SECRET_ACCESS_KEY": aws_access_secret
-        }
-    )
-    certbot.wait()
-    logger.info("certbot output:")
-    for line in certbot.stdout:
-        logger.info(line)
-    if certbot.returncode != 0:
-        logger.error("certbot returned {}. aborting.".format(certbot.returncode))
-        sys.exit(1)
+cmd = [certbot_binary,
+       "certonly",
+       "--dns-route53",
+       "--logs-dir",
+       logs_directory,
+       "--config-dir",
+       config_directory,
+       "--work-dir",
+       work_directory,
+       "-m",
+       notification_email,
+       "--agree-tos",
+       "--non-interactive",
+       "--server"
+      ]
+if test_mode:
+    cmd.append(LE_TEST_SERVER)
 else:
-    logger.info("renewing certificate")
+    cmd.append(LE_PRODUCTION_SERVER)
+for domain in configured_domains:
+    cmd.append("-d")
+    cmd.append(domain)
+logger.debug("running certbot as: {}".format(" ".join(cmd)))
+certbot = subprocess.Popen(
+    cmd,
+    stderr=subprocess.STDOUT,
+    stdout=subprocess.PIPE,
+    cwd=le_work_directory,
+    encoding="utf-8",
+    errors="ignore",
+    env={
+        "AWS_ACCESS_KEY_ID": aws_access_key,
+        "AWS_SECRET_ACCESS_KEY": aws_access_secret
+    }
+)
+certbot.wait()
+logger.info("certbot output:")
+for line in certbot.stdout:
+    logger.info(line)
+if certbot.returncode != 0:
+    logger.error("certbot returned {}. aborting.".format(certbot.returncode))
+    sys.exit(1)
 
-# TODO: check that the created files are there
-# TODO: get the expiration date from the cert itself
-# TODO: create a new server certificate on IAM with the expiration date in the name
-# TODO: iterate on each llistener of each load balancer to change the certificate to the new one
-# TODO: state handling to allow for the "renew" command
+# check that the created files are there
+created_files = [
+    "cert.pem",
+    "chain.pem",
+    "fullchain.pem",
+    "privkey.pem"
+]
+for created_file in created_files:
+    found = False
+    for domain in configured_domains:
+        created_path = "{}/live/{}".format(config_directory, domain)
+        if os.path.exists("{}/{}".format(created_path, created_file)):
+            # for any configured domain we found a file matching that domain
+            found = True
+            break
+    if not found:
+        logger.error("file {} missing in path {}".format(created_file, created_path))
+        sys.exit(1)
+
+logger.info("all files found, checking expiration date")
+
+certificate_data = open("{}/cert.pem".format(created_path)).read()
+private_key_data = open("{}/privkey.pem".format(created_path)).read()
+certificate_chain_data =  open("{}/chain.pem".format(created_path)).read()
+
+loaded_certificate = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, certificate_data)
+expiration_date = parser.parse(loaded_certificate.get_notAfter())
+
+logger.info("current expiration date: {}".format(expiration_date))
+
+# create an IAM server certificate
+
+iam_certificate_name = "le_certificate_exp_{}".format(expiration_date.strftime("%Y_%m_%d"))
+try:
+    iam_certificate_data = iam_client.upload_server_certificate(
+        ServerCertificateName=iam_certificate_name,
+        CertificateBody=certificate_data,
+        PrivateKey=private_key_data,
+        CertificateChain=certificate_chain_data
+    )
+except Exception as e:
+    logger.error("error creating new certificate {}: {}".format(iam_certificate_name, e))
+    sys.exit(1)
+
+# we can call the [] directly, if this fails amazon has changed the api and boto and 2/3 of the internet are
+# broken
+iam_certificate_id = iam_certificate_data["ServerCertificateMetadata"]["Arn"]
+logger.info("created server certificate with name {} and ARN {}".format(iam_certificate_name, iam_certificate_id))
+
+# we need to sleep about 1 minutes, or the elb operation will fail due to replication times
+logger.info("sleeping {} seconds to allow the cert to propagate".format(AWS_SLEEP_TIME))
+time.sleep(AWS_SLEEP_TIME)
+logger.info("sleep done")
+
+# iterate on each llistener of each load balancer to change the certificate to the new one
+for load_balancer_name in configured_load_balancers:
+    logger.info("updating certificate for load balancer: {}".format(load_balancer_name))
+    try:
+        response = elb_client.set_load_balancer_listener_ssl_certificate(
+            LoadBalancerName=load_balancer_name,
+            LoadBalancerPort=LOAD_BALANCER_PORT,
+            SSLCertificateId=iam_certificate_id
+        )
+    except Exception as e:
+        logger.error("error setting new certificate for load balancer {}: {}".format(load_balancer_name, e))
+        sys.exit(1)
+
+logger.info("done")
