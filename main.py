@@ -1,7 +1,7 @@
 import sys
 import logging
 
-if sys.version_info.major != 3 or sys.version_info.minor != 6:
+if sys.version_info.major != 3 or sys.version_info.minor < 6:
     # seriously, removing this won't help, it will break along the way
     # install python3.6, it's less painful
     logging.error("only python 3.6 is supported :(")
