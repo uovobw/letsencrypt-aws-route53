@@ -203,6 +203,15 @@ expiration_date = parser.parse(loaded_certificate.get_notAfter())
 
 logger.info("current expiration date: {}".format(expiration_date))
 
+# we now decide wether to upload the certificate to aws or only print the location of the files and exit
+upload_to_aws = get_from_config(config, 'global', 'upload_to_aws')
+if not upload_to_aws:
+    logger.info('Not uploading to AWS as per configuration')
+    logger.info('Certificate file location: {}/cert.pem'.format(created_path))
+    logger.info('Certificate key file location: {}/key.pem'.format(created_path))
+    logger.info('Certificate chain file location: {}/chain.pem'.format(created_path))
+    sys.exit(0)
+
 # create an IAM server certificate
 
 iam_certificate_name = "le_certificate_exp_{}".format(expiration_date.strftime("%Y_%m_%d"))

@@ -1,3 +1,5 @@
+global:
+    upload_to_aws: true
 aws:
     load_balancers:
         - "staging-load-balancer"
