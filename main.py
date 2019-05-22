@@ -68,6 +68,7 @@ le_work_directory = get_from_config(config, "letsencrypt", "work_directory")
 certbot_binary = find_executable("certbot")
 notification_email = get_from_config(config, "letsencrypt", "email")
 test_mode = get_from_config(config, "letsencrypt", "test")
+upload_to_aws = get_from_config(config, 'global', 'upload_to_aws')
 if not os.path.exists(le_work_directory):
     logger.error("cannot find work directory at {}, creating".format(le_work_directory))
     try:
@@ -122,11 +123,12 @@ except botocore.exceptions.ClientError as e:
 aws_load_balancers = call_aws(elb_client, "describe_load_balancers")
 aws_load_balancers_names = [x.get("LoadBalancerName") for x in aws_load_balancers.get("LoadBalancerDescriptions")]
 configured_load_balancers = get_from_config(config, "aws", "load_balancers")
-for lb_name in configured_load_balancers:
-    if lb_name not in aws_load_balancers_names:
-        logger.error("load balancer {} not found in aws".format(lb_name))
-        logger.error("found load balancers: {}".format(",".join(aws_load_balancers_names)))
-        sys.exit(1)
+if upload_to_aws: 
+    for lb_name in configured_load_balancers:
+        if lb_name not in aws_load_balancers_names:
+            logger.error("load balancer {} not found in aws".format(lb_name))
+            logger.error("found load balancers: {}".format(",".join(aws_load_balancers_names)))
+            sys.exit(1)
 
 configured_domains = get_from_config(config, "letsencrypt", "domains")
 
@@ -204,7 +206,6 @@ expiration_date = parser.parse(loaded_certificate.get_notAfter())
 logger.info("current expiration date: {}".format(expiration_date))
 
 # we now decide wether to upload the certificate to aws or only print the location of the files and exit
-upload_to_aws = get_from_config(config, 'global', 'upload_to_aws')
 if not upload_to_aws:
     logger.info('Not uploading to AWS as per configuration')
     logger.info('Certificate file location: {}/cert.pem'.format(created_path))
